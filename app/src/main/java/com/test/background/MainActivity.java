@@ -1,10 +1,18 @@
 package com.test.background;
 
 import android.app.Dialog;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.ServiceConnection;
 import android.net.Uri;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
+import android.os.Message;
+import android.os.Messenger;
+import android.os.RemoteException;
 import android.support.customtabs.CustomTabsIntent;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
@@ -15,96 +23,50 @@ import android.widget.TextView;
 
 import java.util.Random;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
     private static final String TAG = MainActivity.class.getSimpleName();
-
-    Button btnClick;
-    Handler handler;
-    Runnable runnable;
-    Dialog dialog;
+    private static final int JOB_1 = 1;
+    private static final int JOB_2 = 2;
+    private static final int JOB_1_RESPONSE = 3;
+    private static final int JOB_2_RESPONSE = 4;
+    Messenger messenger = null;
+    Button btnFirst, btnSecond;
+    TextView txtMessage;
+    boolean isBinder = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         Log.i(TAG, "onCreate: ");
-        handler = new Handler(Looper.getMainLooper());
-        btnClick = findViewById(R.id.btnClick);
 
-        btnClick.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                call();
-                showDialog("Title");
-            }
-        });
+        btnFirst = findViewById(R.id.btnFirst);
+        btnSecond = findViewById(R.id.btnSecond);
+        txtMessage = findViewById(R.id.txtMessage);
 
-        runnable = new Runnable() {
-            @Override
-            public void run() {
-                showDialog(generateRandomWord(5));
-                handler.postDelayed(this, 10000);
-            }
-        };
+        btnFirst.setOnClickListener(this);
+        btnSecond.setOnClickListener(this);
+
+        Intent intent =  new Intent(this, MyService.class);
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
 
     }
 
-    private void call() {
-        CustomTabsIntent.Builder builder = new CustomTabsIntent.Builder();
-        CustomTabsIntent customTabsIntent = builder.build();
-        customTabsIntent.launchUrl(this, Uri.parse("https://developer.android.com"));
-    }
-
-    private void showDialog(final String title) {
-        Log.i("MyThread", "showDialog: " + title);
-
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (dialog != null && dialog.isShowing()) dialog.dismiss();
-
-                dialog = new Dialog(MainActivity.this);
-                dialog.setContentView(R.layout.dialog_view);
-
-                TextView txtTitle;
-                Button btnOk;
-
-                txtTitle = dialog.findViewById(R.id.txtTitle);
-                btnOk = dialog.findViewById(R.id.btnOk);
-
-                txtTitle.setText(title);
-                handler.post(runnable);
-                dialog.show();
-
-                dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
-                    @Override
-                    public void onDismiss(DialogInterface dialogInterface) {
-                        Log.i("MyThread", "onDismiss: ");
-
-                    }
-                });
-
-                btnOk.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View view) {
-                        handler.removeCallbacks(runnable);
-                    }
-                });
-
-            }
-        });
-    }
-
-    String generateRandomWord(int wordLength) {
-        Random r = new Random();
-        StringBuilder sb = new StringBuilder(wordLength);
-        for(int i = 0; i < wordLength; i++) {
-            char tmp = (char) ('a' + r.nextInt('z' - 'a'));
-            sb.append(tmp); // Add it to the String
+    ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName componentName, IBinder iBinder) {
+            messenger = new Messenger(iBinder);
+            isBinder = true;
         }
-        return sb.toString();
-    }
+
+        @Override
+        public void onServiceDisconnected(ComponentName componentName) {
+            messenger = null;
+            isBinder = false;
+        }
+    };
+
 
     @Override
     protected void onStart() {
@@ -128,6 +90,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onStop() {
         super.onStop();
         Log.i(TAG, "onStop: ");
+        unbindService(serviceConnection);
+        isBinder = false;
+
     }
 
     @Override
@@ -140,7 +105,57 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         Log.i(TAG, "onDestroy: ");
-        if (handler != null)
-            handler.removeCallbacks(runnable);
+
     }
+
+    @Override
+    public void onClick(View view) {
+        Message msg;
+        if (view.getId() == R.id.btnFirst) {
+
+            msg = Message.obtain(null, JOB_1);
+            msg.replyTo = new Messenger(new ResponseHandler());
+
+            try {
+                messenger.send(msg);
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+
+        } else if (view.getId() == R.id.btnSecond) {
+
+            msg = Message.obtain(null, JOB_2);
+            msg.replyTo = new Messenger(new ResponseHandler());
+
+            try {
+                messenger.send(msg);
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+
+        }
+
+    }
+
+
+    class ResponseHandler extends Handler {
+
+        @Override
+        public void handleMessage(Message msg) {
+            String message;
+            switch (msg.what) {
+                case JOB_1_RESPONSE:
+                    message = msg.getData().getString("response_message");
+                    txtMessage.setText(message);
+                    break;
+                case JOB_2_RESPONSE:
+                    message = msg.getData().getString("response_message");
+                    txtMessage.setText(message);
+                    break;
+            }
+
+            super.handleMessage(msg);
+        }
+    }
+
 }
